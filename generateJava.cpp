@@ -67,7 +67,7 @@ status_t AST::generateJavaTypes(
         path.append(typeName);
         path.append(".java");
 
-        CHECK(Coordinator::MakeParentHierarchy(path));
+        CHECK(Coordinator::MakeParentHierarchy(path)) << path;
         FILE *file = fopen(path.c_str(), "w");
 
         if (file == NULL) {
@@ -108,12 +108,12 @@ status_t AST::generateJava(
         return UNKNOWN_ERROR;
     }
 
-    std::string ifaceName;
-    if (!AST::isInterface(&ifaceName)) {
+    if (!AST::isInterface()) {
         return generateJavaTypes(outputPath, limitToType);
     }
 
     const Interface *iface = mRootScope->getInterface();
+    std::string ifaceName = iface->localName();
 
     const std::string baseName = iface->getBaseName();
 
@@ -272,8 +272,7 @@ status_t AST::generateJava(
         const bool needsCallback = method->results().size() > 1;
 
         if (needsCallback) {
-            out << "\npublic interface "
-                << method->name()
+            out << "\n@java.lang.FunctionalInterface\npublic interface " << method->name()
                 << "Callback {\n";
 
             out.indent();
@@ -303,7 +302,7 @@ status_t AST::generateJava(
             }
 
             out << method->name()
-                << "Callback cb";
+                << "Callback _hidl_cb";
         }
 
         out << ")\n";
@@ -379,7 +378,7 @@ status_t AST::generateJava(
             }
 
             out << method->name()
-                << "Callback cb";
+                << "Callback _hidl_cb";
         }
 
         out << ")\n";
@@ -446,7 +445,7 @@ status_t AST::generateJava(
                 }
 
                 if (needsCallback) {
-                    out << "cb.onValues(";
+                    out << "_hidl_cb.onValues(";
 
                     bool firstField = true;
                     for (const auto &arg : method->results()) {

@@ -1,6 +1,7 @@
 #define LOG_TAG "hidl_test_client"
 
 #include "FooCallback.h"
+#include "hidl_test.h"
 
 #include <android-base/logging.h>
 
@@ -44,6 +45,7 @@
 
 #include <algorithm>
 #include <condition_variable>
+#include <fstream>
 #include <getopt.h>
 #include <inttypes.h>
 #include <mutex>
@@ -55,7 +57,9 @@
 #include <hidl-test/FooHelper.h>
 #include <hidl-test/PointerHelper.h>
 
+#include <hidl/ServiceManagement.h>
 #include <hidl/Status.h>
+#include <hidl/ServiceManagement.h>
 #include <hidlmemory/mapping.h>
 
 #include <utils/Condition.h>
@@ -119,6 +123,17 @@ using ::android::DELAY_NS;
 using ::android::TOLERANCE_NS;
 using ::android::ONEWAY_TOLERANCE_NS;
 using std::to_string;
+
+bool isLibraryOpen(const std::string &lib) {
+    std::ifstream ifs("/proc/self/maps");
+    for (std::string line; std::getline(ifs, line);) {
+        if (line.size() >= lib.size() && line.substr(line.size() - lib.size()) == lib) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 template <typename T>
 static inline ::testing::AssertionResult isOk(const ::android::hardware::Return<T> &ret) {
@@ -451,6 +466,19 @@ public:
         ALOGI("Test setup complete");
     }
 };
+
+TEST_F(HidlTest, PreloadTest) {
+    // in passthrough mode, this will already be opened
+    if (mode == BINDERIZED) {
+        using android::hardware::preloadPassthroughService;
+
+        static const std::string kLib = "android.hardware.tests.inheritance@1.0-impl.so";
+
+        EXPECT_FALSE(isLibraryOpen(kLib));
+        preloadPassthroughService<IParent>();
+        EXPECT_TRUE(isLibraryOpen(kLib));
+    }
+}
 
 TEST_F(HidlTest, ToStringTest) {
     using namespace android::hardware;
@@ -1404,14 +1432,14 @@ TEST_F(HidlTest, DeathRecipientTest) {
     }
 
     std::unique_lock<std::mutex> lock(recipient->mutex);
-    recipient->condition.wait_for(lock, std::chrono::milliseconds(1000), [&recipient]() {
+    recipient->condition.wait_for(lock, std::chrono::milliseconds(100), [&recipient]() {
             return recipient->fired;
     });
     EXPECT_TRUE(recipient->fired);
     EXPECT_EQ(recipient->cookie, 0x1481u);
     EXPECT_EQ(recipient->who, dyingBaz);
     std::unique_lock<std::mutex> lock2(recipient2->mutex);
-    recipient2->condition.wait_for(lock2, std::chrono::milliseconds(1000), [&recipient2]() {
+    recipient2->condition.wait_for(lock2, std::chrono::milliseconds(100), [&recipient2]() {
             return recipient2->fired;
     });
     EXPECT_FALSE(recipient2->fired);
@@ -1877,6 +1905,11 @@ TEST_F(HidlTest, PointerReportErrorsTest) {
 }
 #endif
 
+template <class T>
+static void waitForServer(const std::string &serviceName) {
+    ::android::hardware::details::waitForHwService(T::descriptor, serviceName);
+}
+
 int forkAndRunTests(TestMode mode, bool enableDelayMeasurementTests) {
     pid_t child;
     int status;
@@ -1985,6 +2018,7 @@ int main(int argc, char **argv) {
         handleStatus(pStatus, "PASSTHROUGH");
     }
     if (b) {
+        EACH_SERVER(waitForServer);
         ALOGI("BINDERIZED Test result = %d", bStatus);
         handleStatus(bStatus, "BINDERIZED ");
     }
